@@ -1,5 +1,0 @@
-../User/Queue/queue.c:13:16:Queue_CreateEntry	24	static
-../User/Queue/queue.c:35:16:Queue_ResetEntry	16	static
-../User/Queue/queue.c:43:16:Queue_AddEntry	24	static
-../User/Queue/queue.c:77:16:Queue_RemoveEntry	24	static
-../User/Queue/queue.c:103:16:Queue_GetNextEntry	16	static

@@ -1,5 +1,0 @@
-../User/Adxl355/Src/adxl355_comm.c:16:6:ADXL355_COMM_ConfigSPI	24	static
-../User/Adxl355/Src/adxl355_comm.c:22:15:ADXL355_COMM_ReadSPI	32	static
-../User/Adxl355/Src/adxl355_comm.c:56:15:ADXL355_COMM_ReadSPI_DMA	24	static
-../User/Adxl355/Src/adxl355_comm.c:91:6:HAL_SPI_RxCpltCallback	16	static
-../User/Adxl355/Src/adxl355_comm.c:102:15:ADXL355_COMM_WriteSPI	24	static

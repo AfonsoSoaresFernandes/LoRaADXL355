@@ -1,5 +1,0 @@
-../User/Queue/queue.c:13:16:Queue_CreateEntry	2
-../User/Queue/queue.c:35:16:Queue_ResetEntry	1
-../User/Queue/queue.c:43:16:Queue_AddEntry	4
-../User/Queue/queue.c:77:16:Queue_RemoveEntry	3
-../User/Queue/queue.c:103:16:Queue_GetNextEntry	2

@@ -1,7 +1,0 @@
-../User/Adxl355/Src/adxl355_util.c:11:15:ADXL355_UTIL_Config	16
-../User/Adxl355/Src/adxl355_util.c:109:15:ADXL355_UnpackSampleSet	5
-../User/Adxl355/Src/adxl355_util.c:153:15:ADXL355_SampleSet2Gs	6
-../User/Adxl355/Src/adxl355_util.c:189:15:ADXL355_ClearFIFO	1
-../User/Adxl355/Src/adxl355_util.c:198:15:ADXL355_ActivityThreshold2LSB	6
-../User/Adxl355/Src/adxl355_util.c:237:15:ADXL355_Offset2LSB	6
-../User/Adxl355/Src/adxl355_util.c:276:15:ADXL355_AlignFifo	8

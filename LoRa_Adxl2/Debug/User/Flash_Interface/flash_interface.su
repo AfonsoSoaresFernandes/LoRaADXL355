@@ -1,4 +1,0 @@
-../User/Flash_Interface/flash_interface.c:12:26:Flash_Erase	48	static
-../User/Flash_Interface/flash_interface.c:67:26:Flash_Write	48	static
-../User/Flash_Interface/flash_interface.c:123:26:Flash_Read	48	static
-../User/Flash_Interface/flash_interface.c:168:26:Flash_IsPageBlank	24	static
