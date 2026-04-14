@@ -1,0 +1,6 @@
+../User/Adxl355/Src/adxl355_data.c:17:23:bits_required	2
+../User/Adxl355/Src/adxl355_data.c:38:26:ADXL355_QuantizeSampleSetBlock	17
+../User/Adxl355/Src/adxl355_data.c:122:6:ADXL_SerializeDataHeader	1
+../User/Adxl355/Src/adxl355_data.c:134:6:ADXL355_SerializeRawPayload	2
+../User/Adxl355/Src/adxl355_data.c:162:6:ADXL355_SerializeQuantizedPayload	2
+../User/Adxl355/Src/adxl355_data.c:193:6:ADXL355_SerializeRawUnpackedPayload	2

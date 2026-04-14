@@ -1,0 +1,1052 @@
+/* USER CODE BEGIN Header */
+/**
+  ******************************************************************************
+  * @file    lora_app.c
+  * @author  MCD Application Team
+  * @brief   Application of the LRWAN Middleware
+  ******************************************************************************
+  * @attention
+  *
+  * Copyright (c) 2026 STMicroelectronics.
+  * All rights reserved.
+  *
+  * This software is licensed under terms that can be found in the LICENSE file
+  * in the root directory of this software component.
+  * If no LICENSE file comes with this software, it is provided AS-IS.
+  *
+  ******************************************************************************
+  */
+/* USER CODE END Header */
+
+/* Includes ------------------------------------------------------------------*/
+#include "platform.h"
+#include "sys_app.h"
+#include "lora_app.h"
+#include "stm32_seq.h"
+#include "stm32_timer.h"
+#include "utilities_def.h"
+#include "app_version.h"
+#include "lorawan_version.h"
+#include "subghz_phy_version.h"
+#include "lora_info.h"
+#include "LmHandler.h"
+#include "adc_if.h"
+#include "CayenneLpp.h"
+#include "sys_sensors.h"
+#include "flash_if.h"
+
+/* USER CODE BEGIN Includes */
+#include "loramanager.h"
+#include "../../User/SM2/storagemanager.h"
+#include "../../User/Queue/queue.h"
+#include "../../User/Adxl355_API/adxl355_api.h"
+/* USER CODE END Includes */
+
+/* External variables ---------------------------------------------------------*/
+/* USER CODE BEGIN EV */
+
+/* USER CODE END EV */
+
+/* Private typedef -----------------------------------------------------------*/
+/**
+  * @brief LoRa State Machine states
+  */
+typedef enum TxEventType_e
+{
+  /**
+    * @brief Appdata Transmission issue based on timer every TxDutyCycleTime
+    */
+  TX_ON_TIMER,
+  /**
+    * @brief Appdata Transmission external event plugged on OnSendEvent( )
+    */
+  TX_ON_EVENT
+  /* USER CODE BEGIN TxEventType_t */
+  ,
+  TX_ON_CUSTOM
+  /* USER CODE END TxEventType_t */
+} TxEventType_t;
+
+/* USER CODE BEGIN PTD */
+
+/* USER CODE END PTD */
+
+/* Private define ------------------------------------------------------------*/
+/**
+  * LEDs period value of the timer in ms
+  */
+#define LED_PERIOD_TIME 500
+
+/**
+  * Join switch period value of the timer in ms
+  */
+#define JOIN_TIME 2000
+
+/*---------------------------------------------------------------------------*/
+/*                             LoRaWAN NVM configuration                     */
+/*---------------------------------------------------------------------------*/
+/**
+  * @brief LoRaWAN NVM Flash address
+  * @note last 2 sector of a 128kBytes device
+  */
+#define LORAWAN_NVM_BASE_ADDRESS                    ((void *)0x0803F000UL)
+
+/* USER CODE BEGIN PD */
+
+/* USER CODE END PD */
+
+/* Private macro -------------------------------------------------------------*/
+/* USER CODE BEGIN PM */
+
+/* USER CODE END PM */
+
+/* Private function prototypes -----------------------------------------------*/
+/**
+  * @brief  LoRa End Node send request
+  */
+static void SendTxData(void);
+
+/**
+  * @brief  TX timer callback function
+  * @param  context ptr of timer context
+  */
+static void OnTxTimerEvent(void *context);
+
+/**
+  * @brief  join event callback function
+  * @param  joinParams status of join
+  */
+static void OnJoinRequest(LmHandlerJoinParams_t *joinParams);
+
+/**
+  * @brief callback when LoRaWAN application has sent a frame
+  * @brief  tx event callback function
+  * @param  params status of last Tx
+  */
+static void OnTxData(LmHandlerTxParams_t *params);
+
+/**
+  * @brief callback when LoRaWAN application has received a frame
+  * @param appData data received in the last Rx
+  * @param params status of last Rx
+  */
+static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params);
+
+/**
+  * @brief callback when LoRaWAN Beacon status is updated
+  * @param params status of Last Beacon
+  */
+static void OnBeaconStatusChange(LmHandlerBeaconParams_t *params);
+
+/**
+  * @brief callback when system time has been updated
+  */
+static void OnSysTimeUpdate(void);
+
+/**
+  * @brief callback when LoRaWAN application Class is changed
+  * @param deviceClass new class
+  */
+static void OnClassChange(DeviceClass_t deviceClass);
+
+/**
+  * @brief  LoRa store context in Non Volatile Memory
+  */
+static void StoreContext(void);
+
+/**
+  * @brief  stop current LoRa execution to switch into non default Activation mode
+  */
+static void StopJoin(void);
+
+/**
+  * @brief  Join switch timer callback function
+  * @param  context ptr of Join switch context
+  */
+static void OnStopJoinTimerEvent(void *context);
+
+/**
+  * @brief  Notifies the upper layer that the NVM context has changed
+  * @param  state Indicates if we are storing (true) or restoring (false) the NVM context
+  */
+static void OnNvmDataChange(LmHandlerNvmContextStates_t state);
+
+/**
+  * @brief  Store the NVM Data context to the Flash
+  * @param  nvm ptr on nvm structure
+  * @param  nvm_size number of data bytes which were stored
+  */
+static void OnStoreContextRequest(void *nvm, uint32_t nvm_size);
+
+/**
+  * @brief  Restore the NVM Data context from the Flash
+  * @param  nvm ptr on nvm structure
+  * @param  nvm_size number of data bytes which were restored
+  */
+static void OnRestoreContextRequest(void *nvm, uint32_t nvm_size);
+
+/**
+  * Will be called each time a Radio IRQ is handled by the MAC layer
+  *
+  */
+static void OnMacProcessNotify(void);
+
+/**
+  * @brief Change the periodicity of the uplink frames
+  * @param periodicity uplink frames period in ms
+  * @note Compliance test protocol callbacks
+  */
+static void OnTxPeriodicityChanged(uint32_t periodicity);
+
+/**
+  * @brief Change the confirmation control of the uplink frames
+  * @param isTxConfirmed Indicates if the uplink requires an acknowledgement
+  * @note Compliance test protocol callbacks
+  */
+static void OnTxFrameCtrlChanged(LmHandlerMsgTypes_t isTxConfirmed);
+
+/**
+  * @brief Change the periodicity of the ping slot frames
+  * @param pingSlotPeriodicity ping slot frames period in ms
+  * @note Compliance test protocol callbacks
+  */
+static void OnPingSlotPeriodicityChanged(uint8_t pingSlotPeriodicity);
+
+/**
+  * @brief Will be called to reset the system
+  * @note Compliance test protocol callbacks
+  */
+static void OnSystemReset(void);
+
+/* USER CODE BEGIN PFP */
+
+// --------------- TIMER ---------------
+static void StartTxTimer(void);
+static inline void StopTxTimer(void);
+
+static void StartTimerADXL355Scheduled(void);
+static inline void StopTimerADXL355Scheduled(void);
+
+static void StartTimerADXL355Tilt(void);
+static inline void StoptTimerADXL355Tilt(void);
+
+static void StartTimerADXL355Activity(void);
+static inline void StoptTimerADXL355Activity(void);
+
+// --------------- SCHEDULED ---------------
+static void ScheduledAdxlReadEvent_Config(void);
+static void ScheduledAdxlReadEvent_Read(void);
+static void ScheduledAdxlReadEvent_Process(void);
+static void ScheduledAdxlReadEvent_Finish(void);
+
+static void OnScheduledAdxlReadTimerEvent_Config(void *context);
+static void OnScheduledAdxlReadTimerEvent_Read(void *context);
+static void OnScheduledAdxlReadTimerEvent_Process(void *context);
+static void OnScheduledAdxlReadTimerEvent_Finish(void *context);
+
+// --------------- ACTIVITY ---------------
+
+static void ActivityAdxlReadEvent_Config(void);
+static void ActivityAdxlReadEvent_Read(void);
+static void ActivityAdxlReadEvent_Process(void);
+
+static void OnActivityAdxlReadTimerEvent_Read(void *context);
+
+// --------------- TILT ---------------
+static void OnTiltAdxlReadTimerEvent(void *context);
+static void TiltAdxlReadEvent(void);
+
+
+static void ParseReceivedMsg(void);
+/* USER CODE END PFP */
+
+/* Private variables ---------------------------------------------------------*/
+/**
+  * @brief LoRaWAN default activation type
+  */
+static ActivationType_t ActivationType = LORAWAN_DEFAULT_ACTIVATION_TYPE;
+
+/**
+  * @brief LoRaWAN force rejoin even if the NVM context is restored
+  */
+static bool ForceRejoin = LORAWAN_FORCE_REJOIN_AT_BOOT;
+
+/**
+  * @brief LoRaWAN handler Callbacks
+  */
+static LmHandlerCallbacks_t LmHandlerCallbacks =
+{
+  .GetBatteryLevel =              GetBatteryLevel,
+  .GetTemperature =               GetTemperatureLevel,
+  .GetUniqueId =                  GetUniqueId,
+  .GetDevAddr =                   GetDevAddr,
+  .OnRestoreContextRequest =      OnRestoreContextRequest,
+  .OnStoreContextRequest =        OnStoreContextRequest,
+  .OnMacProcess =                 OnMacProcessNotify,
+  .OnNvmDataChange =              OnNvmDataChange,
+  .OnJoinRequest =                OnJoinRequest,
+  .OnTxData =                     OnTxData,
+  .OnRxData =                     OnRxData,
+  .OnBeaconStatusChange =         OnBeaconStatusChange,
+  .OnSysTimeUpdate =              OnSysTimeUpdate,
+  .OnClassChange =                OnClassChange,
+  .OnTxPeriodicityChanged =       OnTxPeriodicityChanged,
+  .OnTxFrameCtrlChanged =         OnTxFrameCtrlChanged,
+  .OnPingSlotPeriodicityChanged = OnPingSlotPeriodicityChanged,
+  .OnSystemReset =                OnSystemReset,
+};
+
+/**
+  * @brief LoRaWAN handler parameters
+  */
+static LmHandlerParams_t LmHandlerParams =
+{
+  .ActiveRegion =             ACTIVE_REGION,
+  .DefaultClass =             LORAWAN_DEFAULT_CLASS,
+  .AdrEnable =                LORAWAN_ADR_STATE,
+  .IsTxConfirmed =            LORAWAN_DEFAULT_CONFIRMED_MSG_STATE,
+  .TxDatarate =               LORAWAN_DEFAULT_DATA_RATE,
+  .TxPower =                  LORAWAN_DEFAULT_TX_POWER,
+  .PingSlotPeriodicity =      LORAWAN_DEFAULT_PING_SLOT_PERIODICITY,
+  .RxBCTimeout =              LORAWAN_DEFAULT_CLASS_B_C_RESP_TIMEOUT
+};
+
+/**
+  * @brief Type of Event to generate application Tx
+  */
+static TxEventType_t EventType = TX_ON_TIMER;
+
+/**
+  * @brief Timer to handle the application Tx
+  */
+static UTIL_TIMER_Object_t TxTimer;
+
+/**
+  * @brief Tx Timer period
+  */
+static UTIL_TIMER_Time_t TxPeriodicity = APP_TX_DUTYCYCLE;
+
+/**
+  * @brief Join Timer period
+  */
+static UTIL_TIMER_Object_t StopJoinTimer;
+
+/* USER CODE BEGIN PV */
+
+// -------------------------- TILT ---------------------------
+static UTIL_TIMER_Object_t TiltAdxlReadTimer;
+static UTIL_TIMER_Time_t TiltPeriodicity = 900000; // 900 seconds
+
+// -------------------------- SCHEDULED ---------------------------
+static UTIL_TIMER_Object_t ScheduledAdxlReadTimer;
+static UTIL_TIMER_Time_t ScheduledPeriodicity = 90000; // 60 seconds
+
+static UTIL_TIMER_Object_t ScheduledTimer_1;
+static UTIL_TIMER_Time_t ScheduledTimer_1_Periodicity = 1000;
+
+static UTIL_TIMER_Object_t ScheduledTimer_2;
+static UTIL_TIMER_Time_t ScheduledTimer_2_Periodicity = 10;
+
+static UTIL_TIMER_Object_t ScheduledTimer_3;
+static UTIL_TIMER_Time_t ScheduledTimer_3_Periodicity = 100;
+
+static UTIL_TIMER_Object_t ScheduledTimer_4;
+static UTIL_TIMER_Time_t ScheduledTimer_4_Periodicity = 3000;
+
+// --------------------------- ACTIVITY ---------------------------
+static UTIL_TIMER_Object_t ActivityTimer_1;
+static UTIL_TIMER_Time_t ActivityTimer_1_Periodicity = 1;
+
+static LmHandlerFlagStatus_t NetworkJoined = LORAMAC_HANDLER_RESET;
+
+static uint8_t AppDataBuffer[20];
+static LmHandlerAppData_t AppData = { 0, 0, AppDataBuffer};
+static volatile uint8_t AppData_flag = 0;
+/* USER CODE END PV */
+
+/* Exported functions ---------------------------------------------------------*/
+/* USER CODE BEGIN EF */
+
+/* USER CODE END EF */
+
+void LoRaWAN_Init(void)
+{
+  /* USER CODE BEGIN LoRaWAN_Init_LV */
+
+  EventType = TX_ON_CUSTOM;
+  /* USER CODE END LoRaWAN_Init_LV */
+
+  /* USER CODE BEGIN LoRaWAN_Init_1 */
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaReceivedMsgEvent), UTIL_SEQ_RFU, ParseReceivedMsg);
+
+  // -------------------------------------------- SCHEDULED --------------------------------------------
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Config), UTIL_SEQ_RFU, ScheduledAdxlReadEvent_Config);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Read), UTIL_SEQ_RFU, ScheduledAdxlReadEvent_Read);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Process), UTIL_SEQ_RFU, ScheduledAdxlReadEvent_Process);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Finish), UTIL_SEQ_RFU, ScheduledAdxlReadEvent_Finish);
+
+  // -------------------------------------------- ACTIVITY --------------------------------------------
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Config), UTIL_SEQ_RFU, ActivityAdxlReadEvent_Config);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Read), UTIL_SEQ_RFU, ActivityAdxlReadEvent_Read);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Process), UTIL_SEQ_RFU, ActivityAdxlReadEvent_Process);
+
+  // -------------------------------------------- TILT --------------------------------------------
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_TiltADXL355ReadEvent), UTIL_SEQ_RFU, TiltAdxlReadEvent);
+  //UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent), UTIL_SEQ_RFU, SendTxData);
+
+  /* USER CODE END LoRaWAN_Init_1 */
+
+  UTIL_TIMER_Create(&StopJoinTimer, JOIN_TIME, UTIL_TIMER_ONESHOT, OnStopJoinTimerEvent, NULL);
+
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LmHandlerProcess), UTIL_SEQ_RFU, LmHandlerProcess);
+
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), UTIL_SEQ_RFU, SendTxData);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaStoreContextEvent), UTIL_SEQ_RFU, StoreContext);
+  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_LoRaStopJoinEvent), UTIL_SEQ_RFU, StopJoin);
+
+  /* Init Info table used by LmHandler*/
+  LoraInfo_Init();
+
+  /* Init the Lora Stack*/
+  LmHandlerInit(&LmHandlerCallbacks, APP_VERSION);
+
+  LmHandlerConfigure(&LmHandlerParams);
+
+  /* USER CODE BEGIN LoRaWAN_Init_2 */
+  /* USER CODE END LoRaWAN_Init_2 */
+
+  LmHandlerJoin(ActivationType, ForceRejoin);
+
+  if (EventType == TX_ON_TIMER)
+  {
+    /* send every time timer elapses */
+    UTIL_TIMER_Create(&TxTimer, TxPeriodicity, UTIL_TIMER_ONESHOT, OnTxTimerEvent, NULL);
+    UTIL_TIMER_Start(&TxTimer);
+  }
+  else
+  {
+    /* USER CODE BEGIN LoRaWAN_Init_3 */
+	UTIL_TIMER_Create(&TxTimer, TxPeriodicity, UTIL_TIMER_ONESHOT, OnTxTimerEvent, NULL);
+
+	// ------------------------ TILT -------------------------
+	UTIL_TIMER_Create(&TiltAdxlReadTimer, TiltPeriodicity, UTIL_TIMER_ONESHOT, OnTiltAdxlReadTimerEvent, NULL);
+
+	// ------------------------ SCHEDULED -------------------------
+	UTIL_TIMER_Create(&ScheduledAdxlReadTimer, ScheduledPeriodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Config, NULL);
+	UTIL_TIMER_Create(&ScheduledTimer_1, ScheduledTimer_1_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Read, NULL);
+	UTIL_TIMER_Create(&ScheduledTimer_2, ScheduledTimer_2_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Read, NULL);
+	UTIL_TIMER_Create(&ScheduledTimer_3, ScheduledTimer_3_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Process, NULL);
+	UTIL_TIMER_Create(&ScheduledTimer_4, ScheduledTimer_4_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Finish, NULL);
+
+	// ------------------------ ACTIVITY -------------------------
+	UTIL_TIMER_Create(&ActivityTimer_1, ActivityTimer_1_Periodicity, UTIL_TIMER_ONESHOT, OnActivityAdxlReadTimerEvent_Read, NULL);
+
+	UTIL_TIMER_Start(&ScheduledAdxlReadTimer);
+//	UTIL_TIMER_Start(&TiltAdxlReadTimer);
+    /* USER CODE END LoRaWAN_Init_3 */
+  }
+
+  /* USER CODE BEGIN LoRaWAN_Init_Last */
+
+  /* USER CODE END LoRaWAN_Init_Last */
+}
+
+/* USER CODE BEGIN PB_Callbacks */
+
+/* User should remove the #if 0 statement and adapt the below code according with his needs*/
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+  switch (GPIO_Pin)
+  {
+    case ADXL_INT1_Pin:
+
+	  EXTI->IMR1 &= ~EXTI_IMR1_IM7;
+	  NVIC_ClearPendingIRQ(ADXL_INT1_EXTI_IRQn);
+	  __HAL_GPIO_EXTI_CLEAR_IT(ADXL_INT1_Pin);
+
+	  if (ADXL355_GetCurrentConfig() == ADXL355_SCHEDULED) {
+		  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Read), CFG_SEQ_Prio_1);
+	  }else if (ADXL355_GetCurrentConfig() == ADXL355_ACTIVITY) {
+		  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Read), CFG_SEQ_Prio_1);
+	  }
+	  break;
+    case  ADXL_INT2_Pin:
+      UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Config), CFG_SEQ_Prio_1);
+      break;
+    default:
+      break;
+  }
+}
+
+/* USER CODE END PB_Callbacks */
+
+/* Private functions ---------------------------------------------------------*/
+/* USER CODE BEGIN PrFD */
+
+// ------------------------ TIMER -------------------------
+static void StartTxTimer(void){
+	if(!UTIL_TIMER_IsRunning(&TxTimer)){
+		UTIL_TIMER_Start(&TxTimer);
+	}
+}
+static inline void StopTxTimer(void){
+	UTIL_TIMER_Stop(&TxTimer);
+}
+
+static void StartTimerADXL355Scheduled(void){
+	if(!UTIL_TIMER_IsRunning(&ScheduledAdxlReadTimer)){
+		UTIL_TIMER_Start(&ScheduledAdxlReadTimer);
+	}
+}
+static inline void StopTimerADXL355Scheduled(void){
+	UTIL_TIMER_Stop(&ScheduledAdxlReadTimer);
+}
+
+static void StartTimerADXL355Tilt(void){
+	if(!UTIL_TIMER_IsRunning(&TiltAdxlReadTimer)){
+		UTIL_TIMER_Start(&TiltAdxlReadTimer);
+	}
+}
+static inline void StoptTimerADXL355Tilt(void){
+	UTIL_TIMER_Stop(&TiltAdxlReadTimer);
+}
+
+static void StartTimerADXL355Activity(void){
+	if(!UTIL_TIMER_IsRunning(&ActivityTimer_1)){
+		UTIL_TIMER_Start(&ActivityTimer_1);
+	}
+}
+static inline void StoptTimerADXL355Activity(void){
+	UTIL_TIMER_Stop(&ActivityTimer_1);
+}
+
+// ------------------------ SCHEDULED -------------------------
+static void ScheduledAdxlReadEvent_Config(void){
+	uint8_t ret;
+
+	PRINT_LORA("Scheduled ADXL355 Read Event Config\r\n");
+	ret = ADXL355_ConfigScheduled();
+
+	if (ret == 0xFF) {
+		PRINT_LORA("Error configuring ADXL355 for scheduled read\r\n");
+		ADXL355_RestoreEXTI_IRQ();
+		StartTimerADXL355Scheduled();
+	}
+	else {
+		UTIL_TIMER_Start(&ScheduledTimer_1);
+	}
+}
+
+static void ScheduledAdxlReadEvent_Read(void){
+	uint8_t ret;
+
+	PRINT_LORA("Scheduled ADXL355 Read Event Read\r\n");
+	ret = ADXL355_ReadScheduledData_Read(1000);
+
+	if (ret == 0xFF) {
+		PRINT_LORA("Error reading ADXL355 scheduled data\r\n");
+		ADXL355_RestoreEXTI_IRQ();
+		StartTimerADXL355Scheduled();
+	}
+	else if (ret == 0) {
+		UTIL_TIMER_Start(&ScheduledTimer_3);
+	}
+}
+
+static void ScheduledAdxlReadEvent_Process(void){
+	Queue_QueueEntry_t *entry;
+	uint8_t *data;
+	uint32_t size;
+	uint8_t ret;
+
+	PRINT_LORA("Scheduled ADXL355 Read Event Process\r\n");
+	ret = ADXL355_ReadScheduledData_Process(&data, &size);
+
+	if (ret == 0xFF) {
+		PRINT_LORA("Error processing ADXL355 scheduled data\r\n");
+		StartTimerADXL355Scheduled();
+		ADXL355_RestoreEXTI_IRQ();
+	}
+	else {
+		size = 500;
+		StorageManager_Store(SM_ID_IF_BAC, data, size);
+		Queue_CreateEntry(SM_ID_IF_BAC, size, QUEUE_PRIORITY_0, &entry);
+		Queue_AddEntry(entry);
+		UTIL_TIMER_Start(&ScheduledTimer_4);
+	}
+}
+
+static void ScheduledAdxlReadEvent_Finish(void){
+	uint8_t ret;
+
+	PRINT_LORA("Scheduled ADXL355 Read Event Finish\r\n");
+	ret = ADXL355_ReadScheduledData_Finish();
+
+	if (ret == 0xFF) {
+		PRINT_LORA("Error finishing ADXL355 scheduled read\r\n");
+	}
+	StartTxTimer();
+	StartTimerADXL355Scheduled();
+}
+
+
+// ------------------------ ACTIVITY -------------------------
+static void ActivityAdxlReadEvent_Config(void){
+	uint8_t ret;
+
+	PRINT_LORA("Activity ADXL355 Read Event Config\r\n");
+	ret = ADXL355_ConfigActivity();
+
+	if (ret == 0xFF) {
+		PRINT_LORA("Error configuring ADXL355 for activity read\r\n");
+	} else {
+		StartTimerADXL355Activity();
+	}
+}
+
+static void ActivityAdxlReadEvent_Read(void){
+	uint8_t ret;
+
+	PRINT_LORA("Activity ADXL355 Read Event Config\r\n");
+
+	ret = ADXL355_ReadActivityData_Read(1000);
+
+	if (ret == 0xFF) {
+		PRINT_LORA("Error reading ADXL355 activity data\r\n");
+		ADXL355_RestoreEXTI_IRQ();
+	}
+	else if (ret == 0) {
+		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Process), CFG_SEQ_Prio_0);
+	}
+}
+
+static void ActivityAdxlReadEvent_Process(void){
+	Queue_QueueEntry_t *entry;
+	uint8_t *data;
+	uint32_t size;
+	uint8_t ret;
+
+	PRINT_LORA("Activity ADXL355 Read Event Process\r\n");
+	ret = ADXL355_ReadActivityData_Process(&data, &size);
+
+	if (ret == 0xFF) {
+		PRINT_LORA("Error processing ADXL355 activity data\r\n");
+	}
+	else {
+		size = 500;
+		StorageManager_Store(SM_ID_IF_ACL, data, size);
+		Queue_CreateEntry(SM_ID_IF_ACL, size, QUEUE_PRIORITY_1, &entry);
+		Queue_AddEntry(entry);
+		StartTxTimer();
+	}
+	ADXL355_RestoreEXTI_IRQ();
+}
+
+
+// -------------------------- TILT ---------------------------
+static void TiltAdxlReadEvent(void){
+	Queue_QueueEntry_t *entry;
+	uint8_t *data;
+	uint32_t size;
+
+	PRINT_LORA("Tilt ADXL355 Read Event\r\n");
+	ADXL355_ReadTiltData(&data, &size);
+	size = 500;
+	StorageManager_Store(SM_ID_IF_TILT, data, size);
+	Queue_CreateEntry(SM_ID_IF_TILT, size, QUEUE_PRIORITY_0, &entry);
+	Queue_AddEntry(entry);
+
+	StartTxTimer();
+	StartTimerADXL355Tilt();
+}
+
+static void ParseReceivedMsg(void){
+	LoRa_Manager_State_t state;
+
+	PRINT_LORA("ParseReceivedMsg Event\r\n");
+
+	if(AppData_flag == 0){
+		PRINT_LORA("ERROR! No new message received, problem in flow\r\n");
+		return;
+	}
+
+	LoRa_Manager_GetState(&state);
+	if (state == LORA_AWAIT_ACK) {
+		PRINT_LORA("Ack received for current batch\r\n");
+		LoRa_Manager_HandleAck(AppData.Buffer, AppData.BufferSize);
+
+		LoRa_Manager_GetState(&state);
+		if (state == LORA_IDLE) {
+			StopTxTimer();
+		}
+	}
+	AppData_flag = 0;
+}
+
+/* USER CODE END PrFD */
+
+static void OnRxData(LmHandlerAppData_t *appData, LmHandlerRxParams_t *params)
+{
+  /* USER CODE BEGIN OnRxData_1 */
+	PRINT_LORA("OnRxData Event\r\n");
+	if (AppData_flag == 1){
+		PRINT_LORA("ERROR!!! Previous message not processed yet, skip\r\n");
+		return;
+	}
+
+	AppData.Port = appData->Port;
+	AppData.BufferSize = appData->BufferSize;
+	memcpy(AppData.Buffer, appData->Buffer, appData->BufferSize);
+	AppData_flag = 1;
+	UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaReceivedMsgEvent), CFG_SEQ_Prio_0);
+  /* USER CODE END OnRxData_1 */
+}
+
+static void SendTxData(void)
+{
+  /* USER CODE BEGIN SendTxData_1 */
+	LoRa_Manager_State_t state;
+
+	if (ADXL355_GetState() == ADXL355_READY){
+		PRINT_LORA("SendTxData Event\r\n");
+		if (NetworkJoined != LORAMAC_HANDLER_SET){
+			PRINT_LORA("Not joined yet, skip sending\r\n");
+			LmHandlerJoin(ACTIVATION_TYPE_OTAA, true);
+			StartTxTimer();
+			return;
+
+		}
+		LoRa_Manager_Send_Next_Entry();
+	}
+
+	LoRa_Manager_GetState(&state);
+	if (state != LORA_IDLE) {
+		StartTxTimer();
+	}
+  /* USER CODE END SendTxData_1 */
+}
+
+static void OnTxTimerEvent(void *context)
+{
+  /* USER CODE BEGIN OnTxTimerEvent_1 */
+	PRINT_LORA("On Tx Timer Event\r\n");
+  /* USER CODE END OnTxTimerEvent_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), CFG_SEQ_Prio_0);
+
+  /* USER CODE BEGIN OnTxTimerEvent_2 */
+
+  /* USER CODE END OnTxTimerEvent_2 */
+}
+
+/* USER CODE BEGIN PrFD_LedEvents */
+
+// ------------------------ SCHEDULED -------------------------
+static void OnScheduledAdxlReadTimerEvent_Config(void *context)
+{
+  /* USER CODE BEGIN OnTxTimerEvent_1 */
+  PRINT_LORA("On Scheduled Adxl Read Timer Event Config\r\n");
+  /* USER CODE END OnTxTimerEvent_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Config), CFG_SEQ_Prio_0);
+
+  /*Wait for next tx slot*/
+  /* USER CODE BEGIN OnTxTimerEvent_2 */
+
+  /* USER CODE END OnTxTimerEvent_2 */
+}
+
+static void OnScheduledAdxlReadTimerEvent_Read(void *context)
+{
+  /* USER CODE BEGIN OnTxTimerEvent_1 */
+  PRINT_LORA("On Scheduled Adxl Read Timer Event Read\r\n");
+  /* USER CODE END OnTxTimerEvent_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Read), CFG_SEQ_Prio_0);
+
+  /*Wait for next tx slot*/
+  /* USER CODE BEGIN OnTxTimerEvent_2 */
+
+  /* USER CODE END OnTxTimerEvent_2 */
+}
+
+static void OnScheduledAdxlReadTimerEvent_Process(void *context)
+{
+  /* USER CODE BEGIN OnTxTimerEvent_1 */
+  PRINT_LORA("On Scheduled Adxl Read Timer Event Process\r\n");
+  /* USER CODE END OnTxTimerEvent_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Process), CFG_SEQ_Prio_0);
+
+  /*Wait for next tx slot*/
+  /* USER CODE BEGIN OnTxTimerEvent_2 */
+
+  /* USER CODE END OnTxTimerEvent_2 */
+}
+
+static void OnScheduledAdxlReadTimerEvent_Finish(void *context)
+{
+  /* USER CODE BEGIN OnTxTimerEvent_1 */
+  PRINT_LORA("On Scheduled Adxl Read Timer Event Finish\r\n");
+  /* USER CODE END OnTxTimerEvent_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Finish), CFG_SEQ_Prio_0);
+
+  /*Wait for next tx slot*/
+  /* USER CODE BEGIN OnTxTimerEvent_2 */
+
+  /* USER CODE END OnTxTimerEvent_2 */
+}
+
+// ------------------------ ACTIVITY -------------------------
+static void OnActivityAdxlReadTimerEvent_Read(void *context)
+{
+  /* USER CODE BEGIN OnTxTimerEvent_1 */
+  PRINT_LORA("On Activity Adxl Read Timer Event Read\r\n");
+  /* USER CODE END OnTxTimerEvent_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Read), CFG_SEQ_Prio_1);
+
+  /*Wait for next tx slot*/
+  /* USER CODE BEGIN OnTxTimerEvent_2 */
+
+  /* USER CODE END OnTxTimerEvent_2 */
+}
+
+// ------------------------ TILT -------------------------
+static void OnTiltAdxlReadTimerEvent(void *context)
+{
+  /* USER CODE BEGIN OnTxTimerEvent_1 */
+	PRINT_LORA("On Tilt Adxl Read Timer Event\r\n");
+  /* USER CODE END OnTxTimerEvent_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_TiltADXL355ReadEvent), CFG_SEQ_Prio_0);
+
+  /*Wait for next tx slot*/
+  /* USER CODE BEGIN OnTxTimerEvent_2 */
+
+  /* USER CODE END OnTxTimerEvent_2 */
+}
+
+/* USER CODE END PrFD_LedEvents */
+
+static void OnTxData(LmHandlerTxParams_t *params)
+{
+  /* USER CODE BEGIN OnTxData_1 */
+	PRINT_LORA("OnTxData Event\r\n");
+  /* USER CODE END OnTxData_1 */
+}
+
+static void OnJoinRequest(LmHandlerJoinParams_t *joinParams)
+{
+  /* USER CODE BEGIN OnJoinRequest_1 */
+	LoRa_Manager_State_t state;
+
+	PRINT_LORA("OnJoinRequest Event\r\n");
+
+	NetworkJoined = LmHandlerJoinStatus( );
+	PRINT_LORA("JoinParams: NetworkJoined=%d, Status=%d\r\n", NetworkJoined, joinParams->Status);
+
+	LoRa_Manager_GetState(&state);
+	if (state != LORA_IDLE) {
+		StartTxTimer();
+	}
+  /* USER CODE END OnJoinRequest_1 */
+}
+
+static void OnBeaconStatusChange(LmHandlerBeaconParams_t *params)
+{
+  /* USER CODE BEGIN OnBeaconStatusChange_1 */
+	PRINT_LORA("OnBeaconStatusChange Event\r\n");
+  /* USER CODE END OnBeaconStatusChange_1 */
+}
+
+static void OnSysTimeUpdate(void)
+{
+  /* USER CODE BEGIN OnSysTimeUpdate_1 */
+	PRINT_LORA("OnSysTimeUpdate Event\r\n");
+  /* USER CODE END OnSysTimeUpdate_1 */
+}
+
+static void OnClassChange(DeviceClass_t deviceClass)
+{
+  /* USER CODE BEGIN OnClassChange_1 */
+	PRINT_LORA("OnClassChange Event\r\n");
+  /* USER CODE END OnClassChange_1 */
+}
+
+static void OnMacProcessNotify(void)
+{
+  /* USER CODE BEGIN OnMacProcessNotify_1 */
+	PRINT_LORA("OnMacProcessNotify Event\r\n");
+  /* USER CODE END OnMacProcessNotify_1 */
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LmHandlerProcess), CFG_SEQ_Prio_2);
+
+  /* USER CODE BEGIN OnMacProcessNotify_2 */
+
+  /* USER CODE END OnMacProcessNotify_2 */
+}
+
+static void OnTxPeriodicityChanged(uint32_t periodicity)
+{
+  /* USER CODE BEGIN OnTxPeriodicityChanged_1 */
+  PRINT_LORA("OnTxPeriodicityChanged Event\r\n");
+  /* USER CODE END OnTxPeriodicityChanged_1 */
+  TxPeriodicity = periodicity;
+
+  if (TxPeriodicity == 0)
+  {
+    /* Revert to application default periodicity */
+    TxPeriodicity = APP_TX_DUTYCYCLE;
+  }
+
+  /* Update timer periodicity */
+  UTIL_TIMER_Stop(&TxTimer);
+  UTIL_TIMER_SetPeriod(&TxTimer, TxPeriodicity);
+  UTIL_TIMER_Start(&TxTimer);
+  /* USER CODE BEGIN OnTxPeriodicityChanged_2 */
+
+  /* USER CODE END OnTxPeriodicityChanged_2 */
+}
+
+static void OnTxFrameCtrlChanged(LmHandlerMsgTypes_t isTxConfirmed)
+{
+  /* USER CODE BEGIN OnTxFrameCtrlChanged_1 */
+	PRINT_LORA("OnTxFrameCtrlChanged Event\r\n");
+  /* USER CODE END OnTxFrameCtrlChanged_1 */
+  LmHandlerParams.IsTxConfirmed = isTxConfirmed;
+  /* USER CODE BEGIN OnTxFrameCtrlChanged_2 */
+
+  /* USER CODE END OnTxFrameCtrlChanged_2 */
+}
+
+static void OnPingSlotPeriodicityChanged(uint8_t pingSlotPeriodicity)
+{
+  /* USER CODE BEGIN OnPingSlotPeriodicityChanged_1 */
+	PRINT_LORA("OnPingSlotPeriodicityChanged Event\r\n");
+  /* USER CODE END OnPingSlotPeriodicityChanged_1 */
+  LmHandlerParams.PingSlotPeriodicity = pingSlotPeriodicity;
+  /* USER CODE BEGIN OnPingSlotPeriodicityChanged_2 */
+
+  /* USER CODE END OnPingSlotPeriodicityChanged_2 */
+}
+
+static void OnSystemReset(void)
+{
+  /* USER CODE BEGIN OnSystemReset_1 */
+	PRINT_LORA("OnSystemReset Event\r\n");
+  /* USER CODE END OnSystemReset_1 */
+  if ((LORAMAC_HANDLER_SUCCESS == LmHandlerHalt()) && (LmHandlerJoinStatus() == LORAMAC_HANDLER_SET))
+  {
+    NVIC_SystemReset();
+  }
+  /* USER CODE BEGIN OnSystemReset_Last */
+
+  /* USER CODE END OnSystemReset_Last */
+}
+
+static void StopJoin(void)
+{
+  /* USER CODE BEGIN StopJoin_1 */
+	PRINT_LORA("StopJoin Event\r\n");
+  /* USER CODE END StopJoin_1 */
+
+  UTIL_TIMER_Stop(&TxTimer);
+
+  if (LORAMAC_HANDLER_SUCCESS != LmHandlerStop())
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "LmHandler Stop on going ...\r\n");
+  }
+  else
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "LmHandler Stopped\r\n");
+    if (LORAWAN_DEFAULT_ACTIVATION_TYPE == ACTIVATION_TYPE_ABP)
+    {
+      ActivationType = ACTIVATION_TYPE_OTAA;
+      APP_LOG(TS_OFF, VLEVEL_M, "LmHandler switch to OTAA mode\r\n");
+    }
+    else
+    {
+      ActivationType = ACTIVATION_TYPE_ABP;
+      APP_LOG(TS_OFF, VLEVEL_M, "LmHandler switch to ABP mode\r\n");
+    }
+    LmHandlerConfigure(&LmHandlerParams);
+    LmHandlerJoin(ActivationType, true);
+    UTIL_TIMER_Start(&TxTimer);
+  }
+  UTIL_TIMER_Start(&StopJoinTimer);
+  /* USER CODE BEGIN StopJoin_Last */
+
+  /* USER CODE END StopJoin_Last */
+}
+
+static void OnStopJoinTimerEvent(void *context)
+{
+  /* USER CODE BEGIN OnStopJoinTimerEvent_1 */
+	PRINT_LORA("OnStopJoinTimerEvent Event\r\n");
+  /* USER CODE END OnStopJoinTimerEvent_1 */
+  if (ActivationType == LORAWAN_DEFAULT_ACTIVATION_TYPE)
+  {
+    UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaStopJoinEvent), CFG_SEQ_Prio_0);
+  }
+  /* USER CODE BEGIN OnStopJoinTimerEvent_Last */
+
+  /* USER CODE END OnStopJoinTimerEvent_Last */
+}
+
+static void StoreContext(void)
+{
+  LmHandlerErrorStatus_t status = LORAMAC_HANDLER_ERROR;
+
+  /* USER CODE BEGIN StoreContext_1 */
+  PRINT_LORA("StoreContext Event\r\n");
+  /* USER CODE END StoreContext_1 */
+  status = LmHandlerNvmDataStore();
+
+  if (status == LORAMAC_HANDLER_NVM_DATA_UP_TO_DATE)
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "NVM DATA UP TO DATE\r\n");
+  }
+  else if (status == LORAMAC_HANDLER_ERROR)
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "NVM DATA STORE FAILED\r\n");
+  }
+  /* USER CODE BEGIN StoreContext_Last */
+
+  /* USER CODE END StoreContext_Last */
+}
+
+static void OnNvmDataChange(LmHandlerNvmContextStates_t state)
+{
+  /* USER CODE BEGIN OnNvmDataChange_1 */
+	PRINT_LORA("OnNvmDataChange Event\r\n");
+  /* USER CODE END OnNvmDataChange_1 */
+  if (state == LORAMAC_HANDLER_NVM_STORE)
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "NVM DATA STORED\r\n");
+  }
+  else
+  {
+    APP_LOG(TS_OFF, VLEVEL_M, "NVM DATA RESTORED\r\n");
+  }
+  /* USER CODE BEGIN OnNvmDataChange_Last */
+
+  /* USER CODE END OnNvmDataChange_Last */
+}
+
+static void OnStoreContextRequest(void *nvm, uint32_t nvm_size)
+{
+  /* USER CODE BEGIN OnStoreContextRequest_1 */
+	PRINT_LORA("OnStoreContextRequest Event\r\n");
+  /* USER CODE END OnStoreContextRequest_1 */
+  FLASH_IF_Write(LORAWAN_NVM_BASE_ADDRESS, (const void *)nvm, nvm_size);
+
+  /* USER CODE BEGIN OnStoreContextRequest_Last */
+
+  /* USER CODE END OnStoreContextRequest_Last */
+}
+
+static void OnRestoreContextRequest(void *nvm, uint32_t nvm_size)
+{
+  /* USER CODE BEGIN OnRestoreContextRequest_1 */
+	PRINT_LORA("OnRestoreContextRequest Event\r\n");
+  /* USER CODE END OnRestoreContextRequest_1 */
+  FLASH_IF_Read(nvm, LORAWAN_NVM_BASE_ADDRESS, nvm_size);
+  /* USER CODE BEGIN OnRestoreContextRequest_Last */
+
+  /* USER CODE END OnRestoreContextRequest_Last */
+}
+

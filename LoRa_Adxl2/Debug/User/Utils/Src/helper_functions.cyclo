@@ -1,0 +1,4 @@
+../User/Utils/Src/helper_functions.c:14:10:get_current_heap_usage	1
+../User/Utils/Src/helper_functions.c:20:10:get_current_stack_usage	1
+../User/Utils/Src/helper_functions.c:25:6:fill_stack_with_pattern	2
+../User/Utils/Src/helper_functions.c:32:10:get_max_stack_usage	2

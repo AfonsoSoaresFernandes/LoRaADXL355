@@ -1,0 +1,16 @@
+../User/Adxl355_API/adxl355_api.c:147:6:ADXL355_Init	7
+../User/Adxl355_API/adxl355_api.c:221:6:ADXL355_RestoreEXTI_IRQ	1
+../User/Adxl355_API/adxl355_api.c:234:6:ADXL355_ReadTiltData	3
+../User/Adxl355_API/adxl355_api.c:296:9:ADXL355_ConfigScheduled	3
+../User/Adxl355_API/adxl355_api.c:322:9:ADXL355_ReadScheduledData_Read	3
+../User/Adxl355_API/adxl355_api.c:349:9:ADXL355_ReadScheduledData_Process	2
+../User/Adxl355_API/adxl355_api.c:377:9:ADXL355_ReadScheduledData_Finish	1
+../User/Adxl355_API/adxl355_api.c:397:9:ADXL355_ConfigActivity	2
+../User/Adxl355_API/adxl355_api.c:415:9:ADXL355_ReadActivityData_Read	3
+../User/Adxl355_API/adxl355_api.c:441:9:ADXL355_ReadActivityData_Process	1
+../User/Adxl355_API/adxl355_api.c:471:18:ADXL355_GetCurrentConfig	1
+../User/Adxl355_API/adxl355_api.c:475:17:ADXL355_GetState	1
+../User/Adxl355_API/adxl355_api.c:479:16:ReadSampleSets	5
+../User/Adxl355_API/adxl355_api.c:514:13:Adxl355RawDataFrame	2
+../User/Adxl355_API/adxl355_api.c:532:13:Adxl355CompressedDataFrame	2
+../User/Adxl355_API/adxl355_api.c:569:20:ErrorCatchFunction	1

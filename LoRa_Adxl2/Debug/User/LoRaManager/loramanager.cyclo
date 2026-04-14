@@ -1,0 +1,10 @@
+../User/LoRaManager/loramanager.c:46:23:LoRa_Manager_GetState	1
+../User/LoRaManager/loramanager.c:51:23:LoRa_Manager_TriggerSend	1
+../User/LoRaManager/loramanager.c:56:23:LoRa_Manager_InitTransfer	5
+../User/LoRaManager/loramanager.c:93:23:LoRa_Manager_ResetTransfer	1
+../User/LoRaManager/loramanager.c:108:23:LoRa_Manager_Send_Next_Entry	7
+../User/LoRaManager/loramanager.c:158:23:LoRa_Manager_Process	18
+../User/LoRaManager/loramanager.c:275:23:LoRa_Manager_HandleAck	5
+../User/LoRaManager/loramanager.c:318:23:LoRa_Manager_CalculateBatchLimits	3
+../User/LoRaManager/loramanager.c:333:23:LoRa_Manager_BuildStartMessage	1
+../User/LoRaManager/loramanager.c:342:30:LoRa_Send	2
