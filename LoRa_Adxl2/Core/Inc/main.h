@@ -57,7 +57,7 @@ void MX_ADC_Init(void);
 void MX_RTC_Init(void);
 void MX_SUBGHZ_Init(void);
 void MX_USART2_UART_Init(void);
-
+void MX_SPI1_Init(void);
 /* USER CODE BEGIN EFP */
 
 /* USER CODE END EFP */

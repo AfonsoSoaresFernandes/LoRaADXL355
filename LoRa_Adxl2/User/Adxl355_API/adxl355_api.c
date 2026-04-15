@@ -426,7 +426,6 @@ uint8_t ADXL355_ReadActivityData_Read(size_t sample_sets_to_read) {
 		PRINT_ADXL355("Reading Activity Data Read - NOK\r\n");
 		return 0xFF;
 	}
-
 	if ((sample_sets_read + num_samples) >= sample_sets_to_read) {
 		printf("FIN\r\n");
 		sample_sets_read = 0;
@@ -489,7 +488,7 @@ static uint8_t ReadSampleSets(ADXL355_DevCfg_t *dev_cfg,
 
     ADXL_Status_t ret_status;
 	uint8_t num_fifo_entries;
-	uint8_t num_sample_sets;
+	uint8_t num_sample_sets = 0;
 
 	ret_status = ADXL355_ReadNumberFifoEntries(dev_cfg->comm_func,
 											   &num_fifo_entries);

@@ -344,7 +344,7 @@ static UTIL_TIMER_Object_t ScheduledTimer_2;
 static UTIL_TIMER_Time_t ScheduledTimer_2_Periodicity = 5;
 
 static UTIL_TIMER_Object_t ScheduledTimer_4;
-static UTIL_TIMER_Time_t ScheduledTimer_4_Periodicity = 3000;
+static UTIL_TIMER_Time_t ScheduledTimer_4_Periodicity = 9000;
 
 // -------------------------- ACTIVITY ---------------------------
 static UTIL_TIMER_Object_t ActivityAdxlTimer;
@@ -460,7 +460,6 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
     case ADXL_INT1_Pin:
 
 	  EXTI->IMR1 &= ~EXTI_IMR1_IM7;
-	  NVIC_ClearPendingIRQ(ADXL_INT1_EXTI_IRQn);
 	  __HAL_GPIO_EXTI_CLEAR_IT(ADXL_INT1_Pin);
 
 	  if (ADXL355_GetCurrentConfig() == ADXL355_SCHEDULED) {

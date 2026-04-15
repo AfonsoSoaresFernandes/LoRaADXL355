@@ -25,7 +25,7 @@
 #include "usart_if.h"
 
 /* USER CODE BEGIN Includes */
-
+#include "main.h"
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -122,7 +122,7 @@ void PWR_ExitStopMode(void)
   /* Resume not retained USARTx and DMA */
   vcom_Resume();
   /* USER CODE BEGIN ExitStopMode_2 */
-
+  MX_DMA_Init();
   /* USER CODE END ExitStopMode_2 */
 }
 

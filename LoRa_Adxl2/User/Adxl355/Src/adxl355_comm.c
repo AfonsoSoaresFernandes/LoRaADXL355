@@ -67,6 +67,9 @@ ADXL_Status_t ADXL355_COMM_ReadSPI_DMA(const uint8_t address, uint8_t *buffer,
 		}
 	}
 
+	if (HAL_GPIO_ReadPin(adxl355_spi.spi_cs_port, adxl355_spi.spi_cs_pin) == GPIO_PIN_RESET) {
+		HAL_GPIO_WritePin(GPIOB, GPIO_PIN_9,GPIO_PIN_SET);
+	}
     HAL_GPIO_WritePin(adxl355_spi.spi_cs_port, adxl355_spi.spi_cs_pin,
                       GPIO_PIN_RESET);
 
@@ -78,13 +81,14 @@ ADXL_Status_t ADXL355_COMM_ReadSPI_DMA(const uint8_t address, uint8_t *buffer,
 		return ADXL_SPI_SEND_ERROR;
 	}
 
+
 	// For larger data sizes, use DMA for better performance
 	ret_value = HAL_SPI_Receive_DMA(adxl355_spi.hspi, buffer, data_size);
 	if (ret_value != HAL_OK) {
 		HAL_GPIO_WritePin(adxl355_spi.spi_cs_port, adxl355_spi.spi_cs_pin, GPIO_PIN_SET);
 		return ADXL_SPI_RECV_ERROR;
 	}
-
+	HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,GPIO_PIN_SET);
     return ADXL_OK;
 }
 
@@ -94,6 +98,7 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
   UNUSED(hspi);
   HAL_GPIO_WritePin(adxl355_spi.spi_cs_port, adxl355_spi.spi_cs_pin,
   	                      GPIO_PIN_SET);
+  HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,GPIO_PIN_RESET);
   /* NOTE : This function should not be modified, when the callback is needed,
             the HAL_SPI_RxCpltCallback should be implemented in the user file
    */
