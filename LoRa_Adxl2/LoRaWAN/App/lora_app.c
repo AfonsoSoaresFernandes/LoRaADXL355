@@ -230,9 +230,6 @@ static inline void StopTimerADXL355Scheduled(void);
 static void StartTimerADXL355Tilt(void);
 static inline void StoptTimerADXL355Tilt(void);
 
-static void StartTimerADXL355Activity(void);
-static inline void StoptTimerADXL355Activity(void);
-
 // --------------- SCHEDULED ---------------
 static void ScheduledAdxlReadEvent_Config(void);
 static void ScheduledAdxlReadEvent_Read(void);
@@ -250,12 +247,11 @@ static void ActivityAdxlReadEvent_Config(void);
 static void ActivityAdxlReadEvent_Read(void);
 static void ActivityAdxlReadEvent_Process(void);
 
-static void OnActivityAdxlReadTimerEvent_Read(void *context);
+static void OnActivityAdxlReadTimerEvent_Process(void *context);
 
 // --------------- TILT ---------------
 static void OnTiltAdxlReadTimerEvent(void *context);
 static void TiltAdxlReadEvent(void);
-
 
 static void ParseReceivedMsg(void);
 /* USER CODE END PFP */
@@ -345,23 +341,28 @@ static UTIL_TIMER_Object_t ScheduledTimer_1;
 static UTIL_TIMER_Time_t ScheduledTimer_1_Periodicity = 1000;
 
 static UTIL_TIMER_Object_t ScheduledTimer_2;
-static UTIL_TIMER_Time_t ScheduledTimer_2_Periodicity = 10;
-
-static UTIL_TIMER_Object_t ScheduledTimer_3;
-static UTIL_TIMER_Time_t ScheduledTimer_3_Periodicity = 100;
+static UTIL_TIMER_Time_t ScheduledTimer_2_Periodicity = 5;
 
 static UTIL_TIMER_Object_t ScheduledTimer_4;
 static UTIL_TIMER_Time_t ScheduledTimer_4_Periodicity = 3000;
 
-// --------------------------- ACTIVITY ---------------------------
-static UTIL_TIMER_Object_t ActivityTimer_1;
-static UTIL_TIMER_Time_t ActivityTimer_1_Periodicity = 1;
+// -------------------------- ACTIVITY ---------------------------
+static UTIL_TIMER_Object_t ActivityAdxlTimer;
+static UTIL_TIMER_Time_t ActivityPeriodicity = 5;
+
+// ------------- LORA ---------------
+// timer for when tx is delayed because adxl is reading
+static UTIL_TIMER_Object_t TxTimerDelayed;
+static UTIL_TIMER_Time_t TxTimerDelayed_Periodicity = 1000;
 
 static LmHandlerFlagStatus_t NetworkJoined = LORAMAC_HANDLER_RESET;
 
 static uint8_t AppDataBuffer[20];
 static LmHandlerAppData_t AppData = { 0, 0, AppDataBuffer};
 static volatile uint8_t AppData_flag = 0;
+
+static uint8_t TxTimer_flag = 0;
+
 /* USER CODE END PV */
 
 /* Exported functions ---------------------------------------------------------*/
@@ -386,8 +387,6 @@ void LoRaWAN_Init(void)
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Finish), UTIL_SEQ_RFU, ScheduledAdxlReadEvent_Finish);
 
   // -------------------------------------------- ACTIVITY --------------------------------------------
-  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Config), UTIL_SEQ_RFU, ActivityAdxlReadEvent_Config);
-  UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Read), UTIL_SEQ_RFU, ActivityAdxlReadEvent_Read);
   UTIL_SEQ_RegTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Process), UTIL_SEQ_RFU, ActivityAdxlReadEvent_Process);
 
   // -------------------------------------------- TILT --------------------------------------------
@@ -427,6 +426,7 @@ void LoRaWAN_Init(void)
   {
     /* USER CODE BEGIN LoRaWAN_Init_3 */
 	UTIL_TIMER_Create(&TxTimer, TxPeriodicity, UTIL_TIMER_ONESHOT, OnTxTimerEvent, NULL);
+	UTIL_TIMER_Create(&TxTimerDelayed, TxTimerDelayed_Periodicity, UTIL_TIMER_ONESHOT, OnTxTimerEvent, NULL);
 
 	// ------------------------ TILT -------------------------
 	UTIL_TIMER_Create(&TiltAdxlReadTimer, TiltPeriodicity, UTIL_TIMER_ONESHOT, OnTiltAdxlReadTimerEvent, NULL);
@@ -434,12 +434,11 @@ void LoRaWAN_Init(void)
 	// ------------------------ SCHEDULED -------------------------
 	UTIL_TIMER_Create(&ScheduledAdxlReadTimer, ScheduledPeriodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Config, NULL);
 	UTIL_TIMER_Create(&ScheduledTimer_1, ScheduledTimer_1_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Read, NULL);
-	UTIL_TIMER_Create(&ScheduledTimer_2, ScheduledTimer_2_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Read, NULL);
-	UTIL_TIMER_Create(&ScheduledTimer_3, ScheduledTimer_3_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Process, NULL);
+	UTIL_TIMER_Create(&ScheduledTimer_2, ScheduledTimer_2_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Process, NULL);
 	UTIL_TIMER_Create(&ScheduledTimer_4, ScheduledTimer_4_Periodicity, UTIL_TIMER_ONESHOT, OnScheduledAdxlReadTimerEvent_Finish, NULL);
 
 	// ------------------------ ACTIVITY -------------------------
-	UTIL_TIMER_Create(&ActivityTimer_1, ActivityTimer_1_Periodicity, UTIL_TIMER_ONESHOT, OnActivityAdxlReadTimerEvent_Read, NULL);
+	UTIL_TIMER_Create(&ActivityAdxlTimer, ActivityPeriodicity, UTIL_TIMER_ONESHOT, OnActivityAdxlReadTimerEvent_Process, NULL);
 
 	UTIL_TIMER_Start(&ScheduledAdxlReadTimer);
 //	UTIL_TIMER_Start(&TiltAdxlReadTimer);
@@ -465,13 +464,14 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 	  __HAL_GPIO_EXTI_CLEAR_IT(ADXL_INT1_Pin);
 
 	  if (ADXL355_GetCurrentConfig() == ADXL355_SCHEDULED) {
-		  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ScheduledADXL355ReadEvent_Read), CFG_SEQ_Prio_1);
+		  ScheduledAdxlReadEvent_Read();
 	  }else if (ADXL355_GetCurrentConfig() == ADXL355_ACTIVITY) {
-		  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Read), CFG_SEQ_Prio_1);
+		  ActivityAdxlReadEvent_Read();
 	  }
 	  break;
     case  ADXL_INT2_Pin:
-      UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Config), CFG_SEQ_Prio_1);
+    	ActivityAdxlReadEvent_Config();
+    	ActivityAdxlReadEvent_Read();
       break;
     default:
       break;
@@ -485,7 +485,10 @@ void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 
 // ------------------------ TIMER -------------------------
 static void StartTxTimer(void){
-	if(!UTIL_TIMER_IsRunning(&TxTimer)){
+	if(!UTIL_TIMER_IsRunning(&TxTimer) &&
+	   !UTIL_TIMER_IsRunning(&TxTimerDelayed) &&
+	   TxTimer_flag == 0)
+	{
 		UTIL_TIMER_Start(&TxTimer);
 	}
 }
@@ -511,14 +514,6 @@ static inline void StoptTimerADXL355Tilt(void){
 	UTIL_TIMER_Stop(&TiltAdxlReadTimer);
 }
 
-static void StartTimerADXL355Activity(void){
-	if(!UTIL_TIMER_IsRunning(&ActivityTimer_1)){
-		UTIL_TIMER_Start(&ActivityTimer_1);
-	}
-}
-static inline void StoptTimerADXL355Activity(void){
-	UTIL_TIMER_Stop(&ActivityTimer_1);
-}
 
 // ------------------------ SCHEDULED -------------------------
 static void ScheduledAdxlReadEvent_Config(void){
@@ -549,7 +544,7 @@ static void ScheduledAdxlReadEvent_Read(void){
 		StartTimerADXL355Scheduled();
 	}
 	else if (ret == 0) {
-		UTIL_TIMER_Start(&ScheduledTimer_3);
+		UTIL_TIMER_Start(&ScheduledTimer_2);
 	}
 }
 
@@ -599,8 +594,6 @@ static void ActivityAdxlReadEvent_Config(void){
 
 	if (ret == 0xFF) {
 		PRINT_LORA("Error configuring ADXL355 for activity read\r\n");
-	} else {
-		StartTimerADXL355Activity();
 	}
 }
 
@@ -616,7 +609,7 @@ static void ActivityAdxlReadEvent_Read(void){
 		ADXL355_RestoreEXTI_IRQ();
 	}
 	else if (ret == 0) {
-		UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Process), CFG_SEQ_Prio_0);
+		UTIL_TIMER_Start(&ActivityAdxlTimer);
 	}
 }
 
@@ -712,16 +705,21 @@ static void SendTxData(void)
 		if (NetworkJoined != LORAMAC_HANDLER_SET){
 			PRINT_LORA("Not joined yet, skip sending\r\n");
 			LmHandlerJoin(ACTIVATION_TYPE_OTAA, true);
+			TxTimer_flag = 0;
 			StartTxTimer();
 			return;
 
 		}
 		LoRa_Manager_Send_Next_Entry();
-	}
 
-	LoRa_Manager_GetState(&state);
-	if (state != LORA_IDLE) {
-		StartTxTimer();
+		LoRa_Manager_GetState(&state);
+		if (state != LORA_IDLE) {
+			TxTimer_flag = 0;
+			StartTxTimer();
+		}
+	} else {
+		TxTimer_flag = 0;
+		UTIL_TIMER_Start(&TxTimerDelayed);
 	}
   /* USER CODE END SendTxData_1 */
 }
@@ -732,7 +730,7 @@ static void OnTxTimerEvent(void *context)
 	PRINT_LORA("On Tx Timer Event\r\n");
   /* USER CODE END OnTxTimerEvent_1 */
   UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_LoRaSendOnTxTimerOrButtonEvent), CFG_SEQ_Prio_0);
-
+  TxTimer_flag = 1;
   /* USER CODE BEGIN OnTxTimerEvent_2 */
 
   /* USER CODE END OnTxTimerEvent_2 */
@@ -794,12 +792,13 @@ static void OnScheduledAdxlReadTimerEvent_Finish(void *context)
 }
 
 // ------------------------ ACTIVITY -------------------------
-static void OnActivityAdxlReadTimerEvent_Read(void *context)
+
+static void OnActivityAdxlReadTimerEvent_Process(void *context)
 {
   /* USER CODE BEGIN OnTxTimerEvent_1 */
-  PRINT_LORA("On Activity Adxl Read Timer Event Read\r\n");
+  PRINT_LORA("On Activity Adxl Read Timer Event Process\r\n");
   /* USER CODE END OnTxTimerEvent_1 */
-  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Read), CFG_SEQ_Prio_1);
+  UTIL_SEQ_SetTask((1 << CFG_SEQ_Task_ActivityADXL355ReadEvent_Process), CFG_SEQ_Prio_0);
 
   /*Wait for next tx slot*/
   /* USER CODE BEGIN OnTxTimerEvent_2 */
@@ -833,17 +832,11 @@ static void OnTxData(LmHandlerTxParams_t *params)
 static void OnJoinRequest(LmHandlerJoinParams_t *joinParams)
 {
   /* USER CODE BEGIN OnJoinRequest_1 */
-	LoRa_Manager_State_t state;
-
 	PRINT_LORA("OnJoinRequest Event\r\n");
 
 	NetworkJoined = LmHandlerJoinStatus( );
 	PRINT_LORA("JoinParams: NetworkJoined=%d, Status=%d\r\n", NetworkJoined, joinParams->Status);
 
-	LoRa_Manager_GetState(&state);
-	if (state != LORA_IDLE) {
-		StartTxTimer();
-	}
   /* USER CODE END OnJoinRequest_1 */
 }
 

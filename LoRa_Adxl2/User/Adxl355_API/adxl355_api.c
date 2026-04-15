@@ -334,6 +334,7 @@ uint8_t ADXL355_ReadScheduledData_Read(size_t sample_sets_to_read) {
 	}
 
 	if ((sample_sets_read + num_samples) >= sample_sets_to_read) {
+		printf("FINS\r\n");
 		sample_sets_read = 0;
 		PRINT_ADXL355("Reading Scheduled Data Read - OK (continue)\r\n");
 		return 0;
@@ -408,7 +409,8 @@ uint8_t ADXL355_ConfigActivity() {
 
 	// Disable interrupts
 	EXTI->IMR1 &= ~EXTI_IMR1_IM8; // Disable STM32 ADXL355_INT2 interrupt
-
+	__HAL_GPIO_EXTI_CLEAR_IT(ADXL_INT1_Pin);
+	EXTI->IMR1 |= EXTI_IMR1_IM7;
 	return 0x00;
 }
 
@@ -426,6 +428,7 @@ uint8_t ADXL355_ReadActivityData_Read(size_t sample_sets_to_read) {
 	}
 
 	if ((sample_sets_read + num_samples) >= sample_sets_to_read) {
+		printf("FIN\r\n");
 		sample_sets_read = 0;
 		PRINT_ADXL355("Reading Activity Data Read - OK (continue)\r\n");
 		return 0;
@@ -443,6 +446,9 @@ uint8_t ADXL355_ReadActivityData_Process(uint8_t **frame, uint32_t *frame_size){
 	ADXL_Status_t ret_status;
 
 	PRINT_ADXL355("Reading Activity Data Process\r\n");
+
+	uint32_t deadline = HAL_GetTick() + 2;
+
 	Adxl355CompressedDataFrame(&acc_frame_header,
 							   &compressed_activity_data_header,
 							   SampleSetsRaw, ACTIVITY_SAMPLE_SETS,
@@ -461,6 +467,7 @@ uint8_t ADXL355_ReadActivityData_Process(uint8_t **frame, uint32_t *frame_size){
 							 &ret_status);
 
 	// Clear STM32 ADXL355_INT2 interrupt flag and enable Interrupt
+	EXTI->IMR1 &= ~EXTI_IMR1_IM7;
 	__HAL_GPIO_EXTI_CLEAR_IT(ADXL_INT2_Pin);
 	EXTI->IMR1 |= EXTI_IMR1_IM8;
 

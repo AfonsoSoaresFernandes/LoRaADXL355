@@ -90,8 +90,6 @@ typedef enum
   CFG_SEQ_Task_ScheduledADXL355ReadEvent_Finish,
 
   // --------------- ACTIVITY ------------------
-  CFG_SEQ_Task_ActivityADXL355ReadEvent_Config,
-  CFG_SEQ_Task_ActivityADXL355ReadEvent_Read,
   CFG_SEQ_Task_ActivityADXL355ReadEvent_Process,
 
   // --------------- TILT ------------------
