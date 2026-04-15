@@ -118,11 +118,12 @@ void PWR_ExitStopMode(void)
     ADC interface
     DAC interface USARTx, TIMx, i2Cx, SPIx
     SRAM ctrls, DMAx, DMAMux, AES, RNG, HSEM  */
-
+  SystemClock_Config();
   /* Resume not retained USARTx and DMA */
   vcom_Resume();
   /* USER CODE BEGIN ExitStopMode_2 */
   MX_DMA_Init();
+  MX_SPI1_Init();
   /* USER CODE END ExitStopMode_2 */
 }
 
