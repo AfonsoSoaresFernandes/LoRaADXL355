@@ -6,7 +6,7 @@
  */
 
 #include "adxl355_comm.h"
-
+#include "main.h"
 /* ===================== SPI BACKEND ===================== */
 
 #ifdef HAL_SPI_MODULE_ENABLED
@@ -99,6 +99,9 @@ void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
   HAL_GPIO_WritePin(adxl355_spi.spi_cs_port, adxl355_spi.spi_cs_pin,
   	                      GPIO_PIN_SET);
   HAL_GPIO_WritePin(GPIOB, GPIO_PIN_15,GPIO_PIN_RESET);
+  __HAL_GPIO_EXTI_CLEAR_IT(ADXL_INT1_Pin);
+  EXTI->IMR1 |= EXTI_IMR1_IM7;
+
   /* NOTE : This function should not be modified, when the callback is needed,
             the HAL_SPI_RxCpltCallback should be implemented in the user file
    */

@@ -434,8 +434,7 @@ uint8_t ADXL355_ReadActivityData_Read(size_t sample_sets_to_read) {
 	} else {
 		sample_sets_read += num_samples;
 		PRINT_ADXL355("Reading Activity Data Read - OK (repeat)\r\n");
-		__HAL_GPIO_EXTI_CLEAR_IT(ADXL_INT1_Pin);
-		EXTI->IMR1 |= EXTI_IMR1_IM7;
+
 		return 1;
 	}
 }

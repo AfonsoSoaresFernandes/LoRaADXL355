@@ -26,6 +26,7 @@
 
 /* USER CODE BEGIN Includes */
 #include "main.h"
+#include <stdio.h>
 /* USER CODE END Includes */
 
 /* External variables ---------------------------------------------------------*/
@@ -100,6 +101,11 @@ void PWR_EnterStopMode(void)
 
   /* USER CODE BEGIN EnterStopMode_2 */
 
+  if (HAL_GPIO_ReadPin(ADXL_SPI_NCS_GPIO_Port, ADXL_SPI_NCS_Pin) == GPIO_PIN_RESET) {
+	  printf("fuck\r\n");
+	  return;
+  }
+  printf("stop\r\n");
   /* USER CODE END EnterStopMode_2 */
   HAL_PWREx_EnterSTOP1Mode(PWR_STOPENTRY_WFI);
   /* USER CODE BEGIN EnterStopMode_3 */
